@@ -237,7 +237,7 @@
 
   <!-- GravityDesk title -->
   <text x="600" y="115" font-family="'Inter', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="52" font-weight="800" letter-spacing="3" text-anchor="middle" fill="url(#titleGrad)" filter="url(#glow)">
-    GravityDesk
+    RealGravity
   </text>
 
   <!-- Subtitle -->
