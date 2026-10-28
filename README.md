@@ -36,13 +36,13 @@
 ## ⚡ Core Highlights
 
 - **Dual-Engine Workflows:** Switch between **Deskmates Virtual Office** (manager + backend, frontend and QA engineers) and **Swarm Hall** (10, 20, 30, 40 or 50 agents at a grand oval conference table).
-- **Live LLM Execution:** In live mode, plans, proposals, critiques and code deliverables are generated from your prompt through a multi-provider fallback chain (**DeepSeek-V3 / R1, Qwen-2.5-Coder, Llama-3.3-70B** via OpenRouter, DeepSeek direct, or Groq).
+- **Live LLM Execution:** In live mode, plans, proposals, critiques, votes and code deliverables are generated from your prompt through a multi-provider fallback chain (**DeepSeek-V3 / R1, Qwen-2.5-Coder, Llama-3.3-70B** via OpenRouter, DeepSeek direct, or Groq).
 - **Real Tool-Using Agents:** Agents read files and PDFs, write code to disk, run shell commands and execute tests, every action gated by a permission request.
 - **Visual Rate-Limit Backoff (Coffee Breaks):** On HTTP 429, the affected agent walks to the pantry, waits out the cooldown, and the bridge auto-switches to the next model in the chain.
 - **Human-in-the-Loop Safety:** Permission modals for `file.read`, `file.write` and `shell.exec` (approve once / always / reject), plus an instant **Emergency Stop** that broadcasts `system.halted`.
 - **Deep Reasoning Preservation:** 65-second request window so DeepSeek-R1 can finish its chain-of-thought before the response is cut.
 - **Replayable Event Stream:** Monotonic, seq-tracked WebSocket events with `since_seq` resume. Reconnects produce zero duplicate and zero missing events (tested).
-- **Exportable Reports:** Final report view with PDF export (jsPDF) and project bundle download (JSZip).
+- **Exportable Reports:** Final report view with PDF export (jsPDF), project bundle download (JSZip), and one-click git merge / discard of the agent branch.
 
 ---
 
@@ -56,12 +56,12 @@
 | Event contract (36 event types, REST + WS) | ✅ Done | Documented in `frontend/docs/api-contract.md`, verified by a live-contract test |
 | Live bridge (Node/TS) with real LLM calls | ✅ Done | Task planning, multi-file generation, tests, report, permission round-trips |
 | Agent tool loop (`read_file`, `write_file`, `list_dir`, `execute_command`) | ✅ Done | Permission-gated, PDF/doc extraction helpers in Python |
-| Swarm Hall live run (Node bridge) | 🟡 Partial | Proposals, critiques and final synthesis are real LLM calls. **Vote scores and agreement % are simulated** |
+| Swarm Hall live run | ✅ Done | Proposals, critiques, weighted Borda voting, agreement % and final synthesis all run on live LLM calls through the Python engine |
 | Provider Gateway (Python) | ✅ Done | Token bucket, TPM window, priority queue with aging, AIMD on 429, circuit breaker, fallback chain. 16 tests |
-| Swarm Engine (Python / FastAPI) | ✅ Done (standalone) | Full 6-phase engine, real Borda tally, clustering, verification, supervisor, privacy firewall. 29 tests. **Not yet wired to live provider adapters** |
-| Real provider HTTP adapters in the Python gateway | ⬜ Planned | Gateway logic is tested against a fake provider |
+| Swarm Engine (Python / FastAPI) | ✅ Done | Full 6-phase engine, real Borda tally, clustering, verification, supervisor, privacy firewall. 29 tests. Wired to live provider adapters |
+| Real provider HTTP adapters in the Python gateway | ✅ Done | OpenRouter, DeepSeek and Groq adapters run behind the gateway's rate limiter, breaker and fallback chain |
 | RealGravity / PAG terminal agent (`backend/`) | ✅ Done | Docker sandbox, `strict` / `assist` / `turbo` profiles, egress allowlist, eval harness |
-| Git merge / discard from the UI report | ⬜ Planned | Buttons exist, git actions not wired |
+| Git merge / discard from the UI report | ✅ Done | Report buttons merge or discard the `agent/<timestamp>` branch |
 
 ---
 
@@ -158,7 +158,7 @@ flowchart TB
     Floor <-->|"WebSocket & REST"| Node
     Node --> Models
     Py --- Gateway
-    Gateway -.->|"adapters planned"| Models
+    Gateway -->|"HTTP adapters"| Models
 ```
 
 ---
@@ -206,6 +206,7 @@ sequenceDiagram
 
 Implemented in `bridge/deskmates_bridge/gateway/` and covered by 16 tests:
 
+- Real HTTP adapters for OpenRouter, DeepSeek and Groq
 - Token-bucket limiter with safety margin and a sliding **TPM window**
 - Priority queue with **aging** (no starvation), per-lane and global concurrency caps
 - `429` / `Retry-After` handling with **AIMD** backoff
@@ -264,13 +265,13 @@ npm run dev
 > On Windows, `scripts/start-all.ps1` launches both together.
 > **Note:** the live runner currently writes deliverables under a hard-coded `D:\GravityDesk\output` path. Change it in `frontend/tools/mock-bridge/realRunner.ts` if your checkout lives elsewhere.
 
-### 5. Run the Python Swarm Engine (standalone)
+### 5. Run the Python Swarm Engine
 ```bash
 cd bridge
 pip install -e ".[dev]"
 uvicorn deskmates_bridge.main:app --port 8001
 ```
-Exposes `/api/swarm/estimate`, `/api/swarm/{run_id}/admission`, `/consent`, `/steer`, `/board`, `/egress`, `/phase`, `/ideas`, `/api/providers/health` and `/ws/events`.
+Exposes `/api/swarm/estimate`, `/api/swarm/{run_id}/admission`, `/consent`, `/steer`, `/board`, `/egress`, `/phase`, `/ideas`, `/api/providers/health` and `/ws/events`. Provider keys are read from the same `.env`.
 
 ### 6. Run the RealGravity Terminal Agent
 ```bash
@@ -335,7 +336,7 @@ python -m pytest -q
 |---|---|
 | `frontend/src/` | 3D office, swarm hall, UI panels, state store, A* navigation, simulator |
 | `frontend/tools/mock-bridge/` | Node/TS live bridge: REST + WS server, agent loop, real runner, swarm runner |
-| `bridge/deskmates_bridge/gateway/` | Provider Gateway (rate limiting, breaker, routing) |
+| `bridge/deskmates_bridge/gateway/` | Provider Gateway (provider adapters, rate limiting, breaker, routing) |
 | `bridge/deskmates_bridge/swarm/` | Phase engine, tally, clustering, verification, supervisor, privacy, store |
 | `bridge/config/` | `providers`, `models`, `departments`, `triage`, `swarm`, `personas` YAML |
 | `backend/` | RealGravity / PAG terminal agent: Docker, profiles, plugins, evals |
@@ -346,10 +347,8 @@ python -m pytest -q
 
 ## ⚠️ Known Limitations
 
-- Swarm Hall **voting and agreement score are simulated** in the live Node bridge. The real Borda tally lives in the Python engine, which is not yet connected to live providers.
-- The Python gateway has **no real provider HTTP adapters** yet. Config values in `bridge/config/providers.yaml` are placeholders to calibrate.
 - Agents are procedural low-poly figures, not motion-captured. Monitor screens are a static blue.
-- Git merge / discard buttons in the report are UI-only for now.
+- The live runner's output directory is currently hard-coded (see the note in Quick Start, step 4).
 
 ---
 
